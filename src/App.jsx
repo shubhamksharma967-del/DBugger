@@ -88,7 +88,7 @@ function AiBox({ onAnalyze, loading, analysis, disabled, disabledMsg, retryCount
         {loading?"🔄 Analyzing...":disabled?disabledMsg:"🤖 AI Root Cause Analysis and Next Steps"}
         {retryCount>0&&!loading&&<span style={{marginLeft:8,fontSize:11,opacity:0.7}}>↺ Retry</span>}
       </button>
-      {analysis&&analysis!=="__error__"&&(
+      {analysis&&!analysis.startsWith("__ERR__:")&&(
         <div style={{marginTop:10,padding:14,background:"#0c1a3b",border:`1px solid ${C.accent}`,borderRadius:8,color:C.text,fontSize:13,lineHeight:1.8}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
             <span style={{color:C.accent,fontWeight:700}}>AI Analysis and Next Steps</span>
@@ -97,10 +97,10 @@ function AiBox({ onAnalyze, loading, analysis, disabled, disabledMsg, retryCount
           <div style={{whiteSpace:"pre-wrap"}}>{analysis}</div>
         </div>
       )}
-      {analysis==="__error__"&&(
-        <div style={{marginTop:10,padding:12,background:"#1a0808",border:"1px solid #7f1d1d",borderRadius:8,color:"#fca5a5",fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span>⚠ AI analysis failed. Check your connection and try again.</span>
-          <button onClick={onAnalyze} disabled={loading} style={{background:"#3b0a0a",color:"#ef4444",border:"1px solid #7f1d1d",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:11}}>Retry</button>
+      {analysis?.startsWith("__ERR__:")&&(
+        <div style={{marginTop:10,padding:12,background:"#1a0808",border:"1px solid #7f1d1d",borderRadius:8,color:"#fca5a5",fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+          <span>⚠ {analysis.slice(8)}</span>
+          <button onClick={onAnalyze} disabled={loading} style={{background:"#3b0a0a",color:"#ef4444",border:"1px solid #7f1d1d",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:11,flexShrink:0}}>Retry</button>
         </div>
       )}
     </div>
@@ -108,14 +108,18 @@ function AiBox({ onAnalyze, loading, analysis, disabled, disabledMsg, retryCount
 }
 
 // ─── AI CALL HELPER (routes through Netlify serverless proxy) ────────────────
+function aiErr(err) {
+  return `__ERR__:${err?.message || "AI analysis failed. Check your connection and try again."}`;
+}
+
 async function callAI(system, userMsg, max_tokens = 1400) {
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ system, userMsg, max_tokens })
   });
-  if (!res.ok) throw new Error(`Server error: HTTP ${res.status}`);
-  const d = await res.json();
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || `Server error: HTTP ${res.status}`);
   if (d.error) throw new Error(d.error);
   return d.text || 'No analysis returned.';
 }
@@ -256,7 +260,7 @@ function LogSession({ session }) {
     setAiLoading(true);setAiAnalysis("");
     const prob=[...errE,...wrnE].slice(0,30).map(e=>{let t=`[${e.timestamp}][${e.level}][${e.namespace||e.module||"?"}]${e.requestCtx?` [${e.requestCtx}]`:""} ${e.message}`;if(e.stackTrace.length)t+="\n  "+e.stackTrace.slice(0,3).join(" | ");return t;}).join("\n\n");
     try{const r=await callAI(AI_SYS[type]||AI_SYS.generic,`Analyze these ShareFile ${TYPE_LABEL[type]||type} log issues:\n\n${prob}`);setAiAnalysis(r);setRetryCount(0);}
-    catch{setAiAnalysis("__error__");setRetryCount(c=>c+1);}
+    catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
 
@@ -512,7 +516,7 @@ function HarAnalyzer({ onEntriesLoaded }) {
     setAiLoading(true);setAiAnalysis("");
     const problems=entries.filter(e=>e.issues.length>0).slice(0,20).map(e=>({url:e.url,method:e.method,status:e.status,time:e.time,issues:e.issues.map(i=>i.msg)}));
     try{const r=await callAI("You are a senior ShareFile support engineer. Analyze HAR file issues and give:\n1. Brief summary\n2. Root cause\n3. Step-by-step next steps\nBe concise and actionable.",`Analyze these ShareFile HAR issues:\n\n${JSON.stringify(problems,null,2)}`);setAiAnalysis(r);setRetryCount(0);}
-    catch{setAiAnalysis("__error__");setRetryCount(c=>c+1);}
+    catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
 
@@ -631,7 +635,7 @@ function CorrelationTool({ sharedSessions }) {
     setAiLoading(true);setAiAnalysis("");
     const ctx=results.map(r=>`=== ${r.fileName} (${r.type.toUpperCase()}) ===\n`+r.matches.slice(0,10).map(e=>`[${e.timestamp}][${e.level}][${e.module||"?"}] ${e.message}`).join("\n")).join("\n\n");
     try{const r=await callAI(`You are a senior ShareFile support engineer. You have log entries from MULTIPLE log files matching the same correlation ID or search term. Give:\n1. TIMELINE: Reconstruct events chronologically across all sources\n2. ROOT CAUSE: Based on cross-log evidence\n3. IMPACT: What was affected\n4. NEXT STEPS: Numbered steps to resolve\nCross-reference log sources by name.`,`Correlation search: "${submitted}"\n\nMatching entries:\n\n${ctx}`);setAiAnalysis(r);setRetryCount(0);}
-    catch{setAiAnalysis("__error__");setRetryCount(c=>c+1);}
+    catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
 
@@ -748,7 +752,7 @@ function ApiTraceTool({ sharedSessions, harEntries }) {
       trace.szc.length?`=== StorageCenter ===\n`+trace.szc.slice(0,10).map(e=>`[${e.timestamp}][${e.level}][${e.module}] ${e.message}`).join("\n"):"",
     ].filter(Boolean).join("\n\n");
     try{const r=await callAI(`You are a senior ShareFile support engineer tracing an API request through: Browser (HAR) → IIS → StorageCenter. Give:\n1. REQUEST JOURNEY: Trace browser→IIS→StorageCenter chronologically\n2. WHERE IT FAILED: Exact layer\n3. ROOT CAUSE\n4. NEXT STEPS (numbered)\nCross-reference timing to identify latency.`,`API trace for: "${submitted}"\n\n${ctx}`);setAiAnalysis(r);setRetryCount(0);}
-    catch{setAiAnalysis("__error__");setRetryCount(c=>c+1);}
+    catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
 
