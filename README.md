@@ -6,7 +6,7 @@
 ## What You Will Need Before Starting
 
 1. A computer with internet access
-2. An Anthropic API key (get one free at https://console.anthropic.com)
+2. A Google Gemini API key (get one free at https://aistudio.google.com/app/apikey)
 3. A GitHub account (free at https://github.com)
 4. A Netlify account (free at https://netlify.com)
 5. Node.js installed on your computer (free at https://nodejs.org — download the LTS version)
@@ -30,16 +30,16 @@
 
 ---
 
-## STEP 2 — Get Your Anthropic API Key
+## STEP 2 — Get Your Free Google Gemini API Key
 
-1. Go to https://console.anthropic.com
-2. Sign up for a free account if you don't have one
-3. Once logged in, click "API Keys" in the left sidebar
-4. Click "Create Key"
-5. Give it a name like "SF Debug Tool"
-6. COPY the key — it starts with `sk-ant-...`
-7. Save it somewhere safe (like Notepad) — you will need it in Step 6
+1. Go to https://aistudio.google.com/app/apikey
+2. Sign in with your Google account (Gmail works fine — no credit card needed)
+3. Click "Create API Key"
+4. Select "Create API key in new project"
+5. Your key will appear on screen — it starts with `AIza...`
+6. COPY the key and save it somewhere safe (like Notepad)
    ⚠️  IMPORTANT: Never share this key or put it in any code file
+   ✅  This key is completely FREE — 15 requests/minute, 1 million tokens/day
 
 ---
 
@@ -127,21 +127,73 @@ git push -u origin main
 
 ---
 
-## STEP 7 — Add Your Anthropic API Key (CRITICAL STEP)
+## STEP 7 — Add Your Gemini API Key to Netlify (CRITICAL STEP)
 
 This is the most important step. Without this, the AI analysis features will not work.
 
 1. In your Netlify site dashboard, click "Site configuration" in the left menu
 2. Click "Environment variables"
 3. Click "Add a variable"
-4. Fill in:
-   - Key: `ANTHROPIC_API_KEY`
-   - Value: paste your API key from Step 2 (starts with `sk-ant-...`)
+4. Fill in EXACTLY as shown:
+   - Key:   GEMINI_API_KEY
+   - Value: paste your key from Step 2 (starts with AIza...)
 5. Click "Create variable"
 6. Now you MUST redeploy for this to take effect:
    - Click "Deploys" in the top menu
    - Click "Trigger deploy" → "Deploy site"
    - Wait 1-2 minutes for it to rebuild
+   
+   ✅ Once deployed, the AI Root Cause Analysis button will work on your live site
+
+---
+
+## TESTING LOCALLY BEFORE DEPLOYING (Optional but Recommended)
+
+You can test the whole app — including the AI Analysis feature — on your own
+computer before pushing to Netlify. This avoids surprises after deployment.
+
+### Why `npm run dev` is NOT enough
+
+Running `npm run dev` starts Vite only (usually on http://localhost:5173).
+Vite does NOT run your Netlify serverless function, so `/api/analyze` will
+return a 404 or "fetch failed" — even if your code is correct.
+
+To test the AI Analysis feature locally, you must use the Netlify CLI, which
+runs BOTH the frontend AND the serverless function together.
+
+### Steps to test locally with Gemini
+
+1. In your project folder, create a new file named exactly `.env`
+   (You can copy `.env.example` and rename it to `.env`)
+
+2. Open `.env` and add your real Gemini key:
+   ```
+   GEMINI_API_KEY=AIza_your_real_key_here
+   ```
+   ⚠️ Never commit this `.env` file to GitHub — it's already in `.gitignore`
+
+3. Install dependencies (only needed once):
+   ```
+   npm install
+   ```
+
+4. Start the app using Netlify CLI instead of plain Vite:
+   ```
+   npm run dev:netlify
+   ```
+   This usually opens at **http://localhost:8888** (not 5173)
+
+5. Open http://localhost:8888 in your browser, upload a log/HAR file, and
+   click "AI Root Cause Analysis" — it should now return real results.
+
+### Common local errors and fixes
+
+| Error message | Fix |
+|---|---|
+| "fetch failed" or 404 on /api/analyze | You're using `npm run dev` (port 5173). Use `npm run dev:netlify` instead (port 8888). |
+| "GEMINI_API_KEY is not set" | Your `.env` file is missing, misnamed, or in the wrong folder. It must be in the project root, named exactly `.env`. |
+| "Gemini API error: API key not valid" | Your key is wrong or has extra spaces. Re-copy it from https://aistudio.google.com/app/apikey |
+| Still on port 5173 and nothing works | Stop the server (Ctrl+C) and run `npm run dev:netlify` — do not run both at once |
 
 ---
 
@@ -200,7 +252,7 @@ When you need to update the tool:
 
 ### AI Analysis button shows error
 - Your API key may not be set correctly
-- Go back to Step 7 and double-check the environment variable name is exactly: `ANTHROPIC_API_KEY`
+- Go back to Step 7 and double-check the environment variable name is exactly: `GEMINI_API_KEY`
 - Make sure you redeployed after adding the key
 
 ### "Page not found" on the live URL
@@ -254,17 +306,10 @@ d-bugger/
 | Service | Cost |
 |---------|------|
 | Netlify Free Tier | $0/month (100GB bandwidth, 300 build minutes) |
-| Anthropic API | Pay per use ~$0.003 per analysis (very cheap) |
+| Google Gemini API | FREE — 15 requests/min, 1M tokens/day (no credit card needed) |
 | Custom domain (optional) | ~$10-15/year |
 | Password protection (optional) | $19/month (Netlify Pro) |
 
-For a team of 10 engineers doing ~50 analyses per day, Anthropic API cost would be approximately **$4-5 per month**.
+For a team of 10 engineers doing ~50 analyses per day, Google Gemini API cost is **$0 — completely free** on the free tier.
 
 ---
-
-## Support
-
-If you encounter issues not covered here:
-- Netlify docs: https://docs.netlify.com
-- Anthropic API docs: https://docs.anthropic.com
-- Vite docs: https://vitejs.dev
