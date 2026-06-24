@@ -15,7 +15,7 @@ export const handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const result = await handleAnalyze(body, process.env.ANTHROPIC_API_KEY);
+    const result = await handleAnalyze(body, process.env.ANTHROPIC_API_KEY, process.env.NVIDIA_API_KEY);
     return {
       statusCode: result.status,
       headers: { "Content-Type": "application/json" },
