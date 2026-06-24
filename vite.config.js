@@ -16,7 +16,7 @@ function analyzeApiPlugin(env) {
         req.on("end", async () => {
           try {
             const body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
-            const result = await handleAnalyze(body, env.ANTHROPIC_API_KEY);
+            const result = await handleAnalyze(body, env.ANTHROPIC_API_KEY, env.NVIDIA_API_KEY);
             res.statusCode = result.status;
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(result.body));
