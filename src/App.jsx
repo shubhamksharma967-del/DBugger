@@ -81,15 +81,42 @@ function CopyBtn({ text }) {
   return <button onClick={()=>{navigator.clipboard.writeText(text);setOk(true);setTimeout(()=>setOk(false),2000);}} style={{background:ok?"#022c1a":C.panel,color:ok?C.success:C.muted,border:`1px solid ${ok?C.success:C.border}`,borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:600,transition:"all 0.2s"}}>{ok?"Copied!":"Copy"}</button>;
 }
 
-function AiBox({ onAnalyze, loading, analysis, disabled, disabledMsg, retryCount, redactionSummary }) {
+const NVIDIA_MODELS=[
+  {id:'meta/llama-3.1-70b-instruct',   label:'Llama 3.1 70B'},
+  {id:'meta/llama-3.3-70b-instruct',   label:'Llama 3.3 70B'},
+  {id:'mistralai/mistral-large-2-instruct', label:'Mistral Large 2'},
+  {id:'nvidia/llama-3.1-nemotron-70b-instruct', label:'Nemotron 70B'},
+  {id:'deepseek-ai/deepseek-r1',        label:'DeepSeek R1'},
+];
+
+function AiBox({ onAnalyze, loading, analysis, disabled, disabledMsg, retryCount, redactionSummary, provider, onProviderChange, nvidiaModel, onModelChange, usedProvider, usedModel }) {
   const [showRedactions,setShowRedactions]=useState(false);
+  const isNvidia=provider==='nvidia';
   return (
     <div style={{marginBottom:14}}>
+      {/* ── Provider selector ── */}
+      <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{color:C.muted,fontSize:11,flexShrink:0}}>AI Provider:</span>
+        {[{id:'anthropic',label:'🟣 Anthropic Claude'},{id:'nvidia',label:'⚡ NVIDIA NIM'}].map(p=>(
+          <button key={p.id} onClick={()=>onProviderChange(p.id)} disabled={loading}
+            style={{background:provider===p.id?C.accent:C.panel,color:provider===p.id?"#fff":C.muted,border:`1px solid ${provider===p.id?C.accent:C.border}`,borderRadius:5,padding:"3px 11px",cursor:loading?"not-allowed":"pointer",fontSize:11,fontWeight:provider===p.id?600:400}}>
+            {p.label}
+          </button>
+        ))}
+        {isNvidia&&(
+          <select value={nvidiaModel} onChange={e=>onModelChange(e.target.value)} disabled={loading}
+            style={{background:C.panel,color:C.text,border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",fontSize:11,cursor:"pointer"}}>
+            {NVIDIA_MODELS.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        )}
+      </div>
+      {/* ── Analyze button ── */}
       <button onClick={onAnalyze} disabled={loading||disabled}
-        style={{background:loading||disabled?C.border:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",cursor:loading||disabled?"not-allowed":"pointer",fontWeight:600,fontSize:13,width:"100%"}}>
-        {loading?"🔄 Analyzing...":disabled?disabledMsg:"🤖 AI Root Cause Analysis and Next Steps"}
+        style={{background:loading||disabled?C.border:isNvidia?"#1a6b3a":C.accent,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",cursor:loading||disabled?"not-allowed":"pointer",fontWeight:600,fontSize:13,width:"100%"}}>
+        {loading?`🔄 Analyzing with ${isNvidia?"NVIDIA NIM":"Anthropic"}...`:disabled?disabledMsg:`${isNvidia?"⚡":"🤖"} AI Root Cause Analysis and Next Steps`}
         {retryCount>0&&!loading&&<span style={{marginLeft:8,fontSize:11,opacity:0.7}}>↺ Retry</span>}
       </button>
+      {/* ── Redaction badge ── */}
       {redactionSummary?.totalRedactions>0&&(
         <div style={{marginTop:8,padding:"7px 12px",background:"#0a1a14",border:"1px solid #166534",borderRadius:6,fontSize:11}}>
           <div onClick={()=>setShowRedactions(!showRedactions)} style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",color:"#4ade80"}}>
@@ -108,11 +135,15 @@ function AiBox({ onAnalyze, loading, analysis, disabled, disabledMsg, retryCount
           )}
         </div>
       )}
+      {/* ── Analysis output ── */}
       {analysis&&!analysis.startsWith("__ERR__:")&&(
         <div style={{marginTop:10,padding:14,background:"#0c1a3b",border:`1px solid ${C.accent}`,borderRadius:8,color:C.text,fontSize:13,lineHeight:1.8}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
             <span style={{color:C.accent,fontWeight:700}}>AI Analysis and Next Steps</span>
-            <CopyBtn text={analysis}/>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {usedProvider&&<span style={{fontSize:10,color:C.muted,background:C.panel,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 7px"}}>{usedProvider==="nvidia"?"⚡ NVIDIA":"🟣 Anthropic"} · {usedModel?.split("/").pop()||usedModel}</span>}
+              <CopyBtn text={analysis}/>
+            </div>
           </div>
           <div style={{whiteSpace:"pre-wrap"}}>{analysis}</div>
         </div>
@@ -132,17 +163,17 @@ function aiErr(err) {
   return `__ERR__:${err?.message || "AI analysis failed. Check your connection and try again."}`;
 }
 
-async function callAI(system, userMsg, max_tokens = 1400) {
+async function callAI(system, userMsg, max_tokens = 1400, provider = 'anthropic', nvidiaModel = 'meta/llama-3.1-70b-instruct') {
   const { redactedText, summary } = redactText(userMsg);
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system, userMsg: redactedText, max_tokens })
+    body: JSON.stringify({ system, userMsg: redactedText, max_tokens, provider, nvidiaModel })
   });
   const d = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(d.error || `Server error: HTTP ${res.status}`);
   if (d.error) throw new Error(d.error);
-  return { text: d.text || 'No analysis returned.', redactionSummary: summary };
+  return { text: d.text || 'No analysis returned.', redactionSummary: summary, provider: d.provider, model: d.model };
 }
 
 // ─── LOG PARSERS ──────────────────────────────────────────────────────────────
@@ -257,6 +288,10 @@ function LogSession({ session }) {
   const [aiLoading,setAiLoading]=useState(false);
   const [retryCount,setRetryCount]=useState(0);
   const [redactionSummary,setRedactionSummary]=useState(null);
+  const [provider,setProvider]=useState('anthropic');
+  const [nvidiaModel,setNvidiaModel]=useState('meta/llama-3.1-70b-instruct');
+  const [usedProvider,setUsedProvider]=useState(null);
+  const [usedModel,setUsedModel]=useState(null);
   const [expanded,setExpanded]=useState(null);
   const [encLoading,setEncLoading]=useState(false);
   const [encDone,setEncDone]=useState(false);
@@ -281,7 +316,7 @@ function LogSession({ session }) {
   const analyze=async()=>{
     setAiLoading(true);setAiAnalysis("");setRedactionSummary(null);
     const prob=[...errE,...wrnE].slice(0,30).map(e=>{let t=`[${e.timestamp}][${e.level}][${e.namespace||e.module||"?"}]${e.requestCtx?` [${e.requestCtx}]`:""} ${e.message}`;if(e.stackTrace.length)t+="\n  "+e.stackTrace.slice(0,3).join(" | ");return t;}).join("\n\n");
-    try{const {text,redactionSummary:rs}=await callAI(AI_SYS[type]||AI_SYS.generic,`Analyze these ShareFile ${TYPE_LABEL[type]||type} log issues:\n\n${prob}`);setAiAnalysis(text);setRedactionSummary(rs);setRetryCount(0);}
+    try{const {text,redactionSummary:rs,provider:up,model:um}=await callAI(AI_SYS[type]||AI_SYS.generic,`Analyze these ShareFile ${TYPE_LABEL[type]||type} log issues:\n\n${prob}`,1400,provider,nvidiaModel);setAiAnalysis(text);setRedactionSummary(rs);setUsedProvider(up);setUsedModel(um);setRetryCount(0);}
     catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
@@ -340,7 +375,7 @@ function LogSession({ session }) {
       </div>
 
       <StatBar items={statItems}/>
-      <AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={errE.length+wrnE.length===0} disabledMsg="No issues found to analyze" retryCount={retryCount} redactionSummary={redactionSummary}/>
+      <AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={errE.length+wrnE.length===0} disabledMsg="No issues found to analyze" retryCount={retryCount} redactionSummary={redactionSummary} provider={provider} onProviderChange={setProvider} nvidiaModel={nvidiaModel} onModelChange={setNvidiaModel} usedProvider={usedProvider} usedModel={usedModel}/>
 
       {/* Filters */}
       <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
@@ -500,6 +535,10 @@ function HarAnalyzer({ onEntriesLoaded }) {
   const [aiLoading,setAiLoading]=useState(false);
   const [retryCount,setRetryCount]=useState(0);
   const [redactionSummary,setRedactionSummary]=useState(null);
+  const [provider,setProvider]=useState('anthropic');
+  const [nvidiaModel,setNvidiaModel]=useState('meta/llama-3.1-70b-instruct');
+  const [usedProvider,setUsedProvider]=useState(null);
+  const [usedModel,setUsedModel]=useState(null);
   const [fileName,setFileName]=useState("");
   const [uploadError,setUploadError]=useState("");
 
@@ -538,7 +577,7 @@ function HarAnalyzer({ onEntriesLoaded }) {
   const analyze=async()=>{
     setAiLoading(true);setAiAnalysis("");setRedactionSummary(null);
     const problems=entries.filter(e=>e.issues.length>0).slice(0,20).map(e=>({url:e.url,method:e.method,status:e.status,time:e.time,issues:e.issues.map(i=>i.msg)}));
-    try{const {text,redactionSummary:rs}=await callAI("You are a senior ShareFile support engineer. Analyze HAR file issues and give:\n1. Brief summary\n2. Root cause\n3. Step-by-step next steps\nBe concise and actionable.",`Analyze these ShareFile HAR issues:\n\n${JSON.stringify(problems,null,2)}`);setAiAnalysis(text);setRedactionSummary(rs);setRetryCount(0);}
+    try{const {text,redactionSummary:rs,provider:up,model:um}=await callAI("You are a senior ShareFile support engineer. Analyze HAR file issues and give:\n1. Brief summary\n2. Root cause\n3. Step-by-step next steps\nBe concise and actionable.",`Analyze these ShareFile HAR issues:\n\n${JSON.stringify(problems,null,2)}`,1400,provider,nvidiaModel);setAiAnalysis(text);setRedactionSummary(rs);setUsedProvider(up);setUsedModel(um);setRetryCount(0);}
     catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
@@ -560,7 +599,7 @@ function HarAnalyzer({ onEntriesLoaded }) {
         <button onClick={()=>{setEntries([]);setAiAnalysis("");if(onEntriesLoaded)onEntriesLoaded([]);}} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:11}}>Clear</button>
       </div>
       <StatBar items={[{label:"Total",value:entries.length,color:C.text},{label:"Errors",value:errC,color:C.error},{label:"Warnings",value:wrnC,color:C.warn},{label:"OK",value:entries.filter(e=>e.issues.length===0).length,color:C.success}]}/>
-      <AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={false} retryCount={retryCount} redactionSummary={redactionSummary}/>
+      <AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={false} retryCount={retryCount} redactionSummary={redactionSummary} provider={provider} onProviderChange={setProvider} nvidiaModel={nvidiaModel} onModelChange={setNvidiaModel} usedProvider={usedProvider} usedModel={usedModel}/>
       <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
         {["all","errors","warnings","ok"].map(f=><button key={f} onClick={()=>setFilter(f)} style={{background:filter===f?C.accent:C.panel,color:filter===f?"#fff":C.muted,border:`1px solid ${filter===f?C.accent:C.border}`,borderRadius:5,padding:"4px 12px",cursor:"pointer",fontSize:11,textTransform:"capitalize"}}>{f}</button>)}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter by URL..." style={{flex:1,background:C.panel,border:`1px solid ${C.border}`,color:C.text,borderRadius:5,padding:"4px 10px",fontSize:11,minWidth:100}}/>
@@ -644,6 +683,10 @@ function CorrelationTool({ sharedSessions }) {
   const [aiLoading,setAiLoading]=useState(false);
   const [retryCount,setRetryCount]=useState(0);
   const [redactionSummary,setRedactionSummary]=useState(null);
+  const [provider,setProvider]=useState('anthropic');
+  const [nvidiaModel,setNvidiaModel]=useState('meta/llama-3.1-70b-instruct');
+  const [usedProvider,setUsedProvider]=useState(null);
+  const [usedModel,setUsedModel]=useState(null);
 
   const doSearch=()=>{if(query.trim()){setSubmitted(query.trim());setAiAnalysis("");}};
 
@@ -658,7 +701,7 @@ function CorrelationTool({ sharedSessions }) {
   const analyze=async()=>{
     setAiLoading(true);setAiAnalysis("");setRedactionSummary(null);
     const ctx=results.map(r=>`=== ${r.fileName} (${r.type.toUpperCase()}) ===\n`+r.matches.slice(0,10).map(e=>`[${e.timestamp}][${e.level}][${e.module||"?"}] ${e.message}`).join("\n")).join("\n\n");
-    try{const {text,redactionSummary:rs}=await callAI(`You are a senior ShareFile support engineer. You have log entries from MULTIPLE log files matching the same correlation ID or search term. Give:\n1. TIMELINE: Reconstruct events chronologically across all sources\n2. ROOT CAUSE: Based on cross-log evidence\n3. IMPACT: What was affected\n4. NEXT STEPS: Numbered steps to resolve\nCross-reference log sources by name.`,`Correlation search: "${submitted}"\n\nMatching entries:\n\n${ctx}`);setAiAnalysis(text);setRedactionSummary(rs);setRetryCount(0);}
+    try{const {text,redactionSummary:rs,provider:up,model:um}=await callAI(`You are a senior ShareFile support engineer. You have log entries from MULTIPLE log files matching the same correlation ID or search term. Give:\n1. TIMELINE: Reconstruct events chronologically across all sources\n2. ROOT CAUSE: Based on cross-log evidence\n3. IMPACT: What was affected\n4. NEXT STEPS: Numbered steps to resolve\nCross-reference log sources by name.`,`Correlation search: "${submitted}"\n\nMatching entries:\n\n${ctx}`,1400,provider,nvidiaModel);setAiAnalysis(text);setRedactionSummary(rs);setUsedProvider(up);setUsedModel(um);setRetryCount(0);}
     catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
@@ -709,7 +752,7 @@ function CorrelationTool({ sharedSessions }) {
                 <span style={{color:C.text,fontWeight:700}}>{totalMatches}</span> matches across <span style={{color:C.text,fontWeight:700}}>{results.length}</span> of {sharedSessions.length} files for <span style={{color:"#60a5fa",fontFamily:"monospace"}}>"{submitted}"</span>
               </div>
 
-              {results.length>0&&<AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={false} retryCount={retryCount} redactionSummary={redactionSummary}/>}
+              {results.length>0&&<AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={false} retryCount={retryCount} redactionSummary={redactionSummary} provider={provider} onProviderChange={setProvider} nvidiaModel={nvidiaModel} onModelChange={setNvidiaModel} usedProvider={usedProvider} usedModel={usedModel}/>}
 
               {results.length===0?(
                 <div style={{padding:22,textAlign:"center",background:C.panel,borderRadius:8,border:`1px solid ${C.border}`,color:C.muted,fontSize:12}}>No matches found for "{submitted}" in any loaded log file.</div>
@@ -756,6 +799,10 @@ function ApiTraceTool({ sharedSessions, harEntries }) {
   const [aiLoading,setAiLoading]=useState(false);
   const [retryCount,setRetryCount]=useState(0);
   const [redactionSummary,setRedactionSummary]=useState(null);
+  const [provider,setProvider]=useState('anthropic');
+  const [nvidiaModel,setNvidiaModel]=useState('meta/llama-3.1-70b-instruct');
+  const [usedProvider,setUsedProvider]=useState(null);
+  const [usedModel,setUsedModel]=useState(null);
 
   const iisSess=sharedSessions.filter(s=>s.type==="iis");
   const szcSess=sharedSessions.filter(s=>s.type==="szc");
@@ -776,7 +823,7 @@ function ApiTraceTool({ sharedSessions, harEntries }) {
       trace.iis.length?`=== IIS (Server) ===\n`+trace.iis.slice(0,10).map(e=>`[${e.timestamp}] ${e.method} ${e.uri} -> ${e.status} (${e.timeTaken}ms) from ${e.clientIp}`).join("\n"):"",
       trace.szc.length?`=== StorageCenter ===\n`+trace.szc.slice(0,10).map(e=>`[${e.timestamp}][${e.level}][${e.module}] ${e.message}`).join("\n"):"",
     ].filter(Boolean).join("\n\n");
-    try{const {text,redactionSummary:rs}=await callAI(`You are a senior ShareFile support engineer tracing an API request through: Browser (HAR) → IIS → StorageCenter. Give:\n1. REQUEST JOURNEY: Trace browser→IIS→StorageCenter chronologically\n2. WHERE IT FAILED: Exact layer\n3. ROOT CAUSE\n4. NEXT STEPS (numbered)\nCross-reference timing to identify latency.`,`API trace for: "${submitted}"\n\n${ctx}`);setAiAnalysis(text);setRedactionSummary(rs);setRetryCount(0);}
+    try{const {text,redactionSummary:rs,provider:up,model:um}=await callAI(`You are a senior ShareFile support engineer tracing an API request through: Browser (HAR) → IIS → StorageCenter. Give:\n1. REQUEST JOURNEY: Trace browser→IIS→StorageCenter chronologically\n2. WHERE IT FAILED: Exact layer\n3. ROOT CAUSE\n4. NEXT STEPS (numbered)\nCross-reference timing to identify latency.`,`API trace for: "${submitted}"\n\n${ctx}`,1400,provider,nvidiaModel);setAiAnalysis(text);setRedactionSummary(rs);setUsedProvider(up);setUsedModel(um);setRetryCount(0);}
     catch(e){setAiAnalysis(aiErr(e));setRetryCount(c=>c+1);}
     setAiLoading(false);
   };
@@ -818,7 +865,7 @@ function ApiTraceTool({ sharedSessions, harEntries }) {
           {submitted&&trace&&(
             <div>
               <div style={{color:C.muted,fontSize:12,marginBottom:10}}><span style={{color:C.text,fontWeight:700}}>{totalTrace}</span> entries matching <span style={{color:"#a78bfa",fontFamily:"monospace"}}>"{submitted}"</span></div>
-              {totalTrace>0&&<AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={false} retryCount={retryCount} redactionSummary={redactionSummary}/>}
+              {totalTrace>0&&<AiBox onAnalyze={analyze} loading={aiLoading} analysis={aiAnalysis} disabled={false} retryCount={retryCount} redactionSummary={redactionSummary} provider={provider} onProviderChange={setProvider} nvidiaModel={nvidiaModel} onModelChange={setNvidiaModel} usedProvider={usedProvider} usedModel={usedModel}/>}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                 {[
                   {key:"har",label:"🌐 Browser (HAR)",color:"#0c1a3b",border:"#1e3a5f",textColor:"#60a5fa",items:trace.har,render:e=><div><div style={{display:"flex",gap:4,marginBottom:3}}><Badge type={e.status>=400?"error":e.status>=300?"warn":"success"}>{e.status}</Badge><span style={{color:"#94a3b8",fontSize:9,fontFamily:"monospace"}}>{e.method}</span><span style={{color:e.time>2000?"#f59e0b":C.muted,fontSize:9}}>{e.time}ms</span></div><div style={{fontFamily:"monospace",fontSize:9,color:C.muted,wordBreak:"break-all"}}>{e.url?.replace(/^https?:\/\/[^/]+/,"")}</div></div>},
